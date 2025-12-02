@@ -45,3 +45,7 @@ Persistent storage is used to keep:
 
 While it is not necessary mandatory to use persistent storage, it is recommended to use it. Just mount the directory `/persistent` to any
 persistent storage and the given data will be kept.
+
+## example
+
+The file [docker-compose.yml](docker-compose.yml) shows an example of a working configuration using 1 server and 2 clients.
