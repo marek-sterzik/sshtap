@@ -26,14 +26,15 @@ to environment variables.
 
 ### Server variables:
 
-    - `MODE` set to `server` to run in server mode
-    - `AUTHORIZED_KEYS` list of ssh keys authorized to connect to the server container
+* `MODE` set to `server` to run in server mode
+* `AUTHORIZED_KEYS` list of ssh keys authorized to connect to the server container
 
 ### Client variables
-    - `MODE` set to `client` to run in client mode
-    - `PEER` set the peer to connect to in the form of `<host>[:<port>]`. If port is not given, default 22 is assumed
-    - `SSH_KEY` the ssh key to be used for connection to the peer
-    - `RESET_KNOWN_HOSTS` set to `yes` if you want to reset known hosts on startup, default `no`
+
+* `MODE` set to `client` to run in client mode
+* `PEER` set the peer to connect to in the form of `<host>[:<port>]`. If port is not given, default 22 is assumed
+* `SSH_KEY` the ssh key to be used for connection to the peer
+* `RESET_KNOWN_HOSTS` set to `yes` if you want to reset known hosts on startup, default `no`
 
 ## persistent storage
 
