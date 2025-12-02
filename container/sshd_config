@@ -1,0 +1,26 @@
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+ListenAddress ::
+
+HostKey /persistent/etc/ssh/ssh_host_rsa_key
+HostKey /persistent/etc/ssh/ssh_host_ecdsa_key
+HostKey /persistent/etc/ssh/ssh_host_ed25519_key
+
+PermitTunnel ethernet
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+
+UsePAM yes
+
+PrintMotd no
+
+# Allow client to pass locale environment variables
+AcceptEnv LANG LC_*
+
+ForceCommand "/usr/local/bin/server-connect"
+
+# override default of no subsystems
+#Subsystem	sftp	/usr/lib/openssh/sftp-server
+

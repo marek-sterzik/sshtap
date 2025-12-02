@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -e
+
+disconnect() {
+    if [ -n "$CONNECTED" ]; then
+        ip link set dev "$SSH_TUNNEL" down nomaster
+    fi
+    CONNECTED=""
+}
+
+
+if [ -n "$SSH_TUNNEL" ]; then
+    CONNECTED=""
+    trap disconnect SIGINT
+    trap disconnect SIGTERM
+    ip link set dev "$SSH_TUNNEL" master br0 up
+    CONNECTED=1
+
+    echo "connected to server" 1>&2
+    echo 1>&2
+    echo -n "press enter to continue..." 1>&2
+    
+    read
+    
+    disconnect
+
+    echo 1>&2
+    echo "disconnected" 1>&2
+else
+    echo "Error: ssh tunnel was not created!" 1>&2
+fi
