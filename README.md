@@ -20,6 +20,8 @@ In each of the container (server or client) a bridge br0 is created and bridges 
 Both, server and client use the same docker image. If it will be run as a server or as a client will be decided according
 to environment variables.
 
+**Containers needs to be run in privileged mode to work properly.**
+
 ## environment variables
 
 ### Server variables:
