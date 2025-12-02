@@ -15,6 +15,8 @@ run_server() {
         rm -f /root/.ssh/authorized_keys
     fi
 
+    echo "Starting server"
+
     exec /usr/sbin/sshd -D
 }
 
@@ -68,11 +70,14 @@ run_client() {
 
     sleep 2
 
+    echo "Starting client"
+
     ssh -i /root/.ssh/key -p "$PORT" -o "StrictHostKeyChecking=accept-new" -o "Tunnel=ethernet" -w 0:any root@"$PEER" 2>&1 | while read line; do
         if [ -z "$finished" ] && echo "$line" | grep -q 'connected to server'; then
             finish_client_config
             finished=1
         fi
+        echo "$line"
     done
 }
 
