@@ -1,0 +1,43 @@
+#!/bin/bash
+
+set -e
+
+if [ "$#" != 2 ]; then
+    echo "usage: $0 <container> <device>" 1>&2
+    exit 1
+fi
+
+container="$1"
+device="$2"
+
+if [ "`id -u`" != 0 ]; then
+    echo "Error: you must be root to proceed this operation" 1>&2
+    exit 2
+fi
+
+if [ "br0" = "$device" ]; then
+    echo "Error: cannot attach br0 device" 1>&2
+    exit 2
+fi
+
+container_id="$(docker inspect --format='{{ .Id }}' "$container" 2> /dev/null || true)"
+
+if [ -z "$container_id" ]; then
+    echo "Error: no such container: $container" 1>&2
+    exit 3
+fi
+
+pid="$(docker inspect --format='{{.State.Pid}}' "$container_id" 2> /dev/null || true)"
+
+if [ -z "$pid" ]; then
+    echo "Error: container not running: $container" 1>&2
+    exit 3
+fi
+
+if ! docker exec "$container_id" ip link show br0 > /dev/null 2>&1; then
+    echo "Error: container does not contain br0 (not an sshtap container?)"
+    exit 3
+fi
+
+ip link set "$device" netns "$pid"
+docker exec "$container_id" ip link set dev "$device" master br0 up

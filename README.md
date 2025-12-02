@@ -26,12 +26,12 @@ to environment variables.
 
 ### Server variables:
 
-* `MODE` set to `server` to run in server mode
+* `MODE` set to `server` to run in server mode (if not set, mode will be decided according to the value of the PEER variable)
 * `AUTHORIZED_KEYS` list of ssh keys authorized to connect to the server container
 
 ### Client variables
 
-* `MODE` set to `client` to run in client mode
+* `MODE` set to `client` to run in client mode (if not set, mode will be decided according to the value of the PEER variable)
 * `PEER` set the peer to connect to in the form of `<host>[:<port>]`. If port is not given, default 22 is assumed
 * `SSH_KEY` the ssh key to be used for connection to the peer
 * `RESET_KNOWN_HOSTS` set to `yes` if you want to reset known hosts on startup, default `no`
@@ -45,6 +45,19 @@ Persistent storage is used to keep:
 
 While it is not necessary mandatory to use persistent storage, it is recommended to use it. Just mount the directory `/persistent` to any
 persistent storage and the given data will be kept.
+
+## attaching physical devices
+
+It is typically useful to attach physical network devices from the host to the containers. For this purpose, there is a script `attach-device-to-container`
+in this repository which will attach any host physical device to the container and bridge it into the br0 bridge.
+
+Usage:
+```
+./attach-device-to-container <container-name> <physical-device>
+```
+
+The device will be automatically detached when the container stops.
+
 
 ## example
 
