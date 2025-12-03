@@ -1,6 +1,7 @@
 # sshtap
 
-sshtap is a simple docker-based utility to build l2 tunnels using ssh connection.
+sshtap is a simple docker-based utility to build l2 tunnels using ssh connection. Currently, sshtap is under huge development.
+Documentation will be added later.
 
 
 ## scheme
