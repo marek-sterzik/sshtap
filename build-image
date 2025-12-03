@@ -1,0 +1,28 @@
+#!/bin/bash
+
+packagename="mareksterzik/sshtap"
+
+set -e
+
+cd "`dirname "$0"`"
+
+version="`git describe 2> /dev/null || true`"
+
+tags=("$packagename:latest")
+
+if [ -n "$version" ]; then
+    tags+=("$packagename:$version")
+else
+    echo "Warning: cannot determine version from git" 1>&2
+fi
+
+build_args=()
+for tag in "${tags[@]}"; do
+    build_args+=(-t "$tag")
+done
+
+echo "building images: ${tags[@]}"
+
+docker build "${build_args[@]}" container
+
+docker push -- "${tags[@]}"
