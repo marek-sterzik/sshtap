@@ -156,12 +156,12 @@ operation_server() {
     local container_name
     check_perm docker
     if [ "" != "$host_port" ]; then
-        if echo "$host_port" | grep -qv '^[0-9]+$'; then
+        if echo "$host_port" | grep -qv '^[0-9]\+$'; then
             echo "Error: invalid host port value" 1>&2
             exit 1
         fi
         host_port="`expr "$host_port" + 0`"
-        if [ $host_port -lt 0 -o $host_port -gt 65535 ]; then
+        if [ "$host_port" -lt 0 -o "$host_port" -gt 65535 ]; then
             echo "Error: invalid port number in host port option" 1>&2
             exit 1
         fi
