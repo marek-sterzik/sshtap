@@ -168,7 +168,7 @@ operation_server() {
     fi
     export AUTHORIZED_KEYS="`create_pubkey`"
     export MODE="server"
-    export HOSTPORT="$hostport"
+    export HOSTPORT="$host_port"
     container_name="`build_container_name`"
     
     start_container "$container_name" "MODE" "AUTHORIZED_KEYS"
