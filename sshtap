@@ -20,6 +20,7 @@ prefix="$SSHTAP_CONTAINER_PREFIX"
 prefix_set=""
 restart=""
 follow=""
+host_port=""
 devices=()
 wireless_devices=()
 pubkeys=()
@@ -142,6 +143,9 @@ start_container() {
         eval "value=\"\$$e\""
         args+=(-e "$e=$value")
     done
+    if [ -n "$HOSTPORT" ]; then
+        args+=(-p "$HOSTPORT:22")
+    fi
     docker run --privileged --rm --detach --name "$container_name" \
                -v "$container_name:/persistent" \
                "${args[@]}" "$image" > /dev/null
@@ -151,8 +155,20 @@ operation_server() {
     local pubkey
     local container_name
     check_perm docker
+    if [ "" != "$host_port" ]; then
+        if echo "$host_port" | grep -qv '^[0-9]+$'; then
+            echo "Error: invalid host port value" 1>&2
+            exit 1
+        fi
+        host_port="`expr "$host_port" + 0`"
+        if [ $host_port -lt 0 -o $host_port -gt 65535 ]; then
+            echo "Error: invalid port number in host port option" 1>&2
+            exit 1
+        fi
+    fi
     export AUTHORIZED_KEYS="`create_pubkey`"
     export MODE="server"
+    export HOSTPORT="$hostport"
     container_name="`build_container_name`"
     
     start_container "$container_name" "MODE" "AUTHORIZED_KEYS"
@@ -176,6 +192,7 @@ operation_client() {
     if [ -n "$reset_known_hosts" ]; then
         export RESET_KNOWN_HOSTS="yes"
     fi
+    export HOSTPORT=""
     container_name="`build_container_name`"
     
     start_container "$container_name" "MODE" "PEER" "SSH_KEY" "RESET_KNOWN_HOSTS"
@@ -331,6 +348,7 @@ show_help() {
     echo "  -r --restart <prefix>         - restart the container if it is already running" 1>&2
     echo 1>&2
     echo "server options:" 1>&2
+    echo "  -H --host-port <port>         - set the host port where ssh will be running" 1>&2
     echo "  -p --pubkey <pubkey>          - specify public keys in the format of authorized_keys file" 1>&2
     echo "     --pubkeyfile <pubkeyfile>  - specify a file with public keys in the format of" 1>&2
     echo "                                  authorized_keys file" 1>&2
@@ -388,9 +406,10 @@ check_value() {
     fi
 }
 
-options="`getopt -o hscSald:w:p:P:rk:x:rf --long help --long server --long client --long stop --long attach --long attach --long logs \
+options="`getopt -o hscSald:w:p:P:rk:x:rfH: --long help --long server --long client --long stop --long attach --long attach --long logs \
               --long device: --long dev: --long wireless-device: --long wdev: --long pubkey: --long pubkeyfile: --long prune \
-              --long peer: --long reset-known-hosts --long key: --long keyfile: --long prefix: --long restart --long follow -- "$@"`"
+              --long peer: --long reset-known-hosts --long key: --long keyfile: --long prefix: --long restart --long follow \
+              --long host-port: -- "$@"`"
 
 if [ "$?" -eq "0" ]; then
     eval set -- "$options"
@@ -436,6 +455,9 @@ if [ "$?" -eq "0" ]; then
         --prefix|-x)
             set_value "prefix" "$2"
             shift;;
+        --host-port|-H)
+            set_value "host_port" "$2"
+            shift;;
         --restart|-r)
             restart=1;;
         --follow|-f)
@@ -457,6 +479,7 @@ fi
 
 check_value "server" "setting public keys is allowed only when starting container in server mode" "${pubkeys[@]}"
 check_value "server" "setting public keys is allowed only when starting container in server mode" "${pubkeyfiles[@]}"
+check_value "server" "setting host port is allowed only when starting container in server mode" "$host_port"
 
 check_value "client" "peer may be set only when starting container in client mode" "$peer"
 check_value "client" "private key may be set only when starting container in client mode" "$key" "$keyfile"
