@@ -127,7 +127,7 @@ start_container() {
 
     container_id="`get_container_id "$container_name"`"
 
-    if [ -n "$container_id" ]; then
+    if [ -n "$container_id" -a -n "`get_container_pid "$container_id"`"; then
         if [ -n "$restart" ]; then
             if is_container_running "$container_id"; then
                 docker stop -- "$container_id" > /dev/null
