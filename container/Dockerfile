@@ -11,6 +11,7 @@ RUN apt-get update && \
         bridge-utils \
         iproute2 \
         iputils-ping \
+        iw \
 	    && \
 	rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* /etc/ssh/sshd_config.d && \
     mkdir -p /run/sshd

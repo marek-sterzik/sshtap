@@ -142,7 +142,9 @@ start_container() {
         eval "value=\"\$$e\""
         args+=(-e "$e=$value")
     done
-    docker run --privileged --rm --detach --name "$container_name" -v "$container_name:/persistent" "${args[@]}" "$image" > /dev/null
+    docker run --privileged --rm --detach --name "$container_name" \
+               -v "$container_name:/persistent" \
+               "${args[@]}" "$image" > /dev/null
 }
 
 operation_server() {
@@ -298,21 +300,28 @@ attach_device_to_container() {
 show_help() {
     local argv0="`get_argv0`"
     echo "usage:" 1>&2
-    echo "  create a server sshtap container:" 1>&2
+    echo "  start sshtap server container:" 1>&2
     echo "  $argv0 [common-options] --server [creation-options] [server-options] <container>" 1>&2
     echo 1>&2
-    echo "  create a client sshtap container:" 1>&2
+    echo "  start sshtap client container:" 1>&2
     echo "  $argv0 [common-options] --client [creation-options] [client-options] <container>" 1>&2
     echo 1>&2
-    echo "  stop an sshtap container:" 1>&2
+    echo "  stop any sshtap container:" 1>&2
     echo "  $argv0 [common-options] --stop [stop-options] <container>" 1>&2
     echo 1>&2
-    echo "  attach a physical device to a container:" 1>&2
+    echo "  attach a physical device to an sshtap container:" 1>&2
     echo "  $argv0 [common-options] --attach [attach-options] <container>" 1>&2
     echo 1>&2
-    echo "  show logs from a particular container:" 1>&2
+    echo "  show logs for a particular sshtap container:" 1>&2
     echo "  $argv0 [common-options] --logs [logs-options] <container>" 1>&2
     echo 1>&2
+    echo 1>&2
+    echo "action:" 1>&2
+    echo "  -s --server                   - start sshtap server container" 1>&2
+    echo "  -c --client                   - start sshtap client container" 1>&2
+    echo "  -S --stop                     - stop any sshtap container" 1>&2
+    echo "  -a --attach                   - attach a physical device to an sshtap container" 1>&2
+    echo "  -l --logs                     - show logs for a particular sshtap container" 1>&2
     echo 1>&2
     echo "common options:" 1>&2
     echo "  -x --prefix <prefix>          - use this prefix as the namig convention, if not set," 1>&2
