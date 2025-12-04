@@ -1,0 +1,464 @@
+#!/bin/bash
+
+set -e
+
+
+if [ -z "$SSHTAP_CONTAINER_PREFIX" ]; then
+    SSHTAP_CONTAINER_PREFIX="sshtap"
+fi
+
+image="mareksterzik/sshtap:latest"
+operation=""
+help=""
+container=""
+invalid=""
+prune=""
+reset_known_hosts=""
+key=""
+keyfile=""
+prefix="$SSHTAP_CONTAINER_PREFIX"
+prefix_set=""
+restart=""
+follow=""
+devices=()
+pubkeys=()
+pubkeyfiles=()
+
+get_argv0() {
+    echo "$0"
+}
+
+check_perm_docker() {
+    if ! docker ps > /dev/null 2>&1; then
+        echo "Error: you need to have permissions to run docker commands" 1>&2
+        return 1
+    fi
+}
+
+check_perm_root() {
+    if [ "`id -u`" != 0 ]; then
+        echo "Error: you need to be root to proceed this operation" 1>&2
+        return 1
+    fi
+}
+
+check_perm() {
+    for perm in "$@"; do
+        "check_perm_$perm"
+    done
+}
+
+get_container_id() {
+    docker inspect --format='{{ .Id }}' "$1" 2> /dev/null || true
+}
+
+is_container_running() {
+    test -n "$(docker inspect --format='{{.State.Pid}}' "$1" 2> /dev/null || true)"
+}
+
+create_pubkey() {
+    local pubkey
+    local pubkeyfile
+    (
+        for pubkey in "${pubkeys[@]}"; do
+            echo "$pubkey"
+        done
+        for pubkeyfile in "${pubkeyfiles[@]}"; do
+            cat "$pubkeyfile"
+        done
+    ) | sed 's/^[[:space:]]\+//;s/[[:space:]]\+$//;/^$/d'
+    test ${PIPESTATUS[0]} -eq 0
+}
+
+create_privkey() {
+    if [ -n "$key" ]; then
+        echo "$key"
+    elif [ -n "$keyfile" ]; then
+        cat "$keyfile"
+    else
+        echo "Error: you need to specify the private key for clients" 1>&2
+        return 1
+    fi
+}
+
+test_container_name() {
+    if echo "$1" | grep -q '^\([a-zA-Z0-9]\+-\)*[a-zA-Z0-9]\+$'; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+build_container_name() {
+    local full_container_name
+    full_container_name="$container"
+    if [ -n "$prefix" ]; then
+        if ! test_container_name "$prefix"; then
+            echo "Error: invalid container prefix: $prefix" 1>&2
+            return 1
+        fi
+        full_container_name="$prefix-$full_container_name"
+    fi
+    if ! test_container_name "$container"; then
+        echo "Error: invalid container name: $container" 1>&2
+        return 1
+    fi
+    echo "$full_container_name"
+}
+
+ensure_volume_exists() {
+    if ! docker volume inspect -- "$1" > /dev/null 2>&1; then
+        docker volume create -- "$1" > /dev/null
+    fi
+}
+
+start_container() {
+    local container_name
+    local container_id
+    local value
+
+    container_name="$1"
+
+    shift
+
+    ensure_volume_exists "$container_name"
+
+    container_id="`get_container_id "$container_name"`"
+
+    if [ -n "$container_id" ]; then
+        if [ -n "$restart" ]; then
+            if is_container_running "$container_id"; then
+                docker stop -- "$container_id" > /dev/null
+            fi
+        else
+            echo "Error: container already running, giving up" 1>&2
+            return 1
+        fi
+    fi
+
+    args=()
+    for e in "$@"; do
+        eval "value=\"\$$e\""
+        args+=(-e "$e=$value")
+    done
+    docker run --privileged --rm --detach --name "$container_name" -v "$container_name:/persistent" "${args[@]}" "$image" > /dev/null
+}
+
+operation_server() {
+    local pubkey
+    local container_name
+    check_perm docker
+    export AUTHORIZED_KEYS="`create_pubkey`"
+    export MODE="server"
+    container_name="`build_container_name`"
+    
+    start_container "$container_name" "MODE" "AUTHORIZED_KEYS"
+}
+
+operation_client() {
+    local key
+    local container_name
+    check_perm docker
+    if [ -z "$peer" ]; then
+        echo "Error: missing --peer" 1>&2
+        exit 1
+    fi
+
+    key="`create_privkey`"
+
+    export MODE="client"
+    export PEER="$peer"
+    export SSH_KEY="$key"
+    export RESET_KNOWN_HOSTS="no"
+    if [ -n "$reset_known_hosts" ]; then
+        export RESET_KNOWN_HOSTS="yes"
+    fi
+    container_name="`build_container_name`"
+    
+    start_container "$container_name" "MODE" "PEER" "SSH_KEY" "RESET_KNOWN_HOSTS"
+}
+
+operation_stop() {
+    local container_name
+    local container_id
+    check_perm docker
+    container_name="`build_container_name`"
+
+    container_id="`get_container_id "$container_name"`"
+
+    if [ -n "$container_id" ]; then
+        docker stop -- "$container_id" > /dev/null
+    fi
+
+    if [ -n "$prune" ]; then
+        if docker volume inspect -- "$container_name" > /dev/null 2>&1; then
+            docker volume rm "$container_name" > /dev/null
+        fi
+    fi
+}
+
+operation_attach() {
+    local container_name
+    container_name="`build_container_name`"
+    check_perm docker root
+
+    for device in "${devices[@]}"; do
+        attach_device_to_container "$container_name" "$device"
+    done
+}
+
+operation_logs() {
+    local container_name
+    local container_id
+    local f=""
+    check_perm docker
+    container_name="`build_container_name`"
+
+    container_id="`get_container_id "$container_name"`"
+
+    if [ -n "$container_id" ]; then
+        if [ -n "$follow" ]; then
+            f="--follow"
+        fi
+        docker logs $f -- "$container_id"
+    else
+        echo "Error: container does not exist" 1>&2
+    fi
+}
+
+attach_device_to_container() {
+    local container="$1"
+    local device="$2"
+
+    if [ "`id -u`" != 0 ]; then
+        echo "Error: you must be root to proceed this operation" 1>&2
+        return 2
+    fi
+
+    if [ "br0" = "$device" ]; then
+        echo "Error: cannot attach br0 device" 1>&2
+        return 2
+    fi
+
+    container_id="$(get_container_id "$1")"
+
+    if [ -z "$container_id" ]; then
+        echo "Error: no such container: $container" 1>&2
+        return 3
+    fi
+
+    pid="$(docker inspect --format='{{.State.Pid}}' "$container_id" 2> /dev/null || true)"
+
+    if [ -z "$pid" ]; then
+        echo "Error: container not running: $container" 1>&2
+        return 3
+    fi
+
+    if ! docker exec "$container_id" ip link show br0 > /dev/null 2>&1; then
+        echo "Error: container does not contain br0 (not an sshtap container?)"
+        return 3
+    fi
+    
+    if ip link show "$device" > /dev/null 2>&1; then
+        ip link set "$device" netns "$pid"
+        docker exec "$container_id" ip link set dev "$device" master br0 up
+    elif ! docker exec "$container_id" ip link show "$device" > /dev/null 2>&1; then
+        echo "Error: no such device: $device" 1>&2
+        return 4
+    fi
+}
+
+show_help() {
+    local argv0="`get_argv0`"
+    echo "usage:" 1>&2
+    echo "  create a server sshtap container:" 1>&2
+    echo "  $argv0 [common-options] --server [creation-options] [server-options] <container>" 1>&2
+    echo 1>&2
+    echo "  create a client sshtap container:" 1>&2
+    echo "  $argv0 [common-options] --client [creation-options] [client-options] <container>" 1>&2
+    echo 1>&2
+    echo "  stop an sshtap container:" 1>&2
+    echo "  $argv0 [common-options] --stop [stop-options] <container>" 1>&2
+    echo 1>&2
+    echo "  attach a physical device to a container:" 1>&2
+    echo "  $argv0 [common-options] --attach [attach-options] <container>" 1>&2
+    echo 1>&2
+    echo "  show logs from a particular container:" 1>&2
+    echo "  $argv0 [common-options] --logs [logs-options] <container>" 1>&2
+    echo 1>&2
+    echo 1>&2
+    echo "common options:" 1>&2
+    echo "  -x --prefix <prefix>         - use this prefix as the namig convention, if not set," 1>&2
+    echo "                                 SSHTAP_CONTAINER_PREFIX env variable is used or 'sshtap'" 1>&2
+    echo 1>&2
+    echo "creation options:" 1>&2
+    echo "  -r --restart <prefix>        - restart the container if it is already running" 1>&2
+    echo 1>&2
+    echo "server options:" 1>&2
+    echo "  -p --pubkey <pubkey>         - specify public keys in the format of authorized_keys file" 1>&2
+    echo "     --pubkeyfile <pubkeyfile> - specify a file with public keys in the format of" 1>&2
+    echo "                                 authorized_keys file" 1>&2
+    echo 1>&2
+    echo "client options:" 1>&2
+    echo "  -P --peer <peer>             - set the peer to connect to in the form <host>[:<port>]" 1>&2
+    echo "  -k --key <key>               - use the private key passed as an argument" 1>&2
+    echo "     --keyfile <keyfile>       - use the private key from the given file" 1>&2
+    echo "  -r --reset-known-hosts       - reset known hosts when starting the container" 1>&2
+    echo 1>&2
+    echo "stop options:" 1>&2
+    echo "     --prune                   - wipe also the persistent storage of the container" 1>&2
+    echo 1>&2
+    echo "attach options:" 1>&2
+    echo "  -d --device <device>         - attach this physical device to the container" 1>&2
+    echo 1>&2
+    echo "logs options:" 1>&2
+    echo "  -f --follow                  - follow the logs" 1>&2
+}
+
+set_operation() {
+    if [ -z "$operation" ]; then
+        operation="$1"
+    else
+        echo "Error: multiple operations selected, please select just one operation" 1>&2
+        invalid=1
+    fi
+}
+
+set_value() {
+    local variable="$1"
+    local value="$2"
+    local old_value=""
+    eval "old_value=\"\$$variable\""
+    if [ -n "$old_value" ]; then
+        echo "Error: cannot set multiple values for --$variable" 1>&2
+        invalid=1
+    fi
+    eval "$variable=\"\$value\""
+}
+
+check_value() {
+    local op="$1"
+    local msg="$2"
+    shift 2
+    if [ "$op" != "$operation" ]; then
+        while [ "$#" -gt 0 -a "$1" = "" ]; do
+            shift
+        done
+        if [ "$#" -gt 0 ]; then
+            echo "Error: $msg" 1>&2
+            invalid=1
+        fi
+    fi
+}
+
+options="`getopt -o hscSald:p:P:rk:x:rf --long help --long server --long client --long stop --long attach --long attach --long logs \
+              --long device: --long pubkey: --long pubkeyfile: --long prune --long peer: --long reset-known-hosts --long key: \
+              --long keyfile: --long prefix: --long restart --long follow -- "$@"`"
+
+if [ "$?" -eq "0" ]; then
+    eval set -- "$options"
+    while [ "$1" != "--" ]; do
+        case "$1" in
+        --help|-h)
+            help="1";;
+        --server|-s)
+            set_operation "server";;
+        --client|-c)
+            set_operation "client";;
+        --stop|-S)
+            set_operation "stop";;
+        --attach|-a)
+            set_operation "attach";;
+        --logs|-l)
+            set_operation "logs";;
+        --device|-d)
+            devices+=("$2")
+            shift;;
+        --pubkey|-p)
+            pubkeys+=("$2")
+            shift;;
+        --pubkeyfile)
+            pubkeyfiles+=("$2")
+            shift;;
+        --prune)
+            prune="1";;
+        --peer|-P)
+            set_value "peer" "$2"
+            shift;;
+        --reset-known-hosts|-r)
+            reset_known_hosts="1";;
+        --key|-k)
+            set_value "key" "$2"
+            shift;;
+        --keyfile)
+            set_value "keyfile" "$2"
+            shift;;
+        --prefix|-x)
+            set_value "prefix" "$2"
+            shift;;
+        --restart|-r)
+            restart=1;;
+        --follow|-f)
+            follow=1;;
+        *)
+            invalid=1;;
+        esac
+        shift
+    done
+    shift
+else
+    invalid=1
+fi
+
+if [ -n "$help" ]; then
+    show_help
+    exit 1
+fi
+
+check_value "server" "setting public keys is allowed only when starting container in server mode" "${pubkeys[@]}"
+check_value "server" "setting public keys is allowed only when starting container in server mode" "${pubkeyfiles[@]}"
+
+check_value "client" "peer may be set only when starting container in client mode" "$peer"
+check_value "client" "private key may be set only when starting container in client mode" "$key" "$keyfile"
+if [ -n "$key" -a -n "$keyfile" ]; then
+    echo "Error: either use --key or --keyfile but not both" 1>&2
+    invalid=1
+fi
+
+check_value "stop" "--prune may be used only when stopping container" "$prune"
+
+check_value "attach" "--device option is available only with --attach option" "${devices[@]}"
+
+check_value "logs" "--follow is available only for --logs action" "$follow"
+
+if [ -n "$restart" ]; then
+    if [ "$operation" != "server" -a "$operation" != "client" ]; then
+        echo "Error: --restart flag may be used only together with --server or --client" 1>&2
+        invalid=1
+    fi
+fi
+
+if [ -z "$operation" ]; then
+    echo "Error: no operation specified" 1>&2
+    exit 1
+fi
+
+if [ -z "$invalid" ]; then
+    if [ "$#" -lt 1 ]; then
+        echo "Error: missing container" 1>&2
+        invalid=1
+    elif [ "$#" -gt 1 ]; then
+        echo "Error: only one container may be specified" 1>&2
+        invalid=1
+    fi
+fi
+
+container="$1"
+
+if [ -n "$invalid" ]; then
+    echo "Error: invalid options" 1>&2
+    exit 1
+fi
+
+"operation_$operation"
+
