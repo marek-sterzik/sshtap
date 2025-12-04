@@ -7,6 +7,7 @@ RUN apt-get update && \
         curl \
         openssh-server \
         openssh-client \
+        hostapd \
         net-tools \
         bridge-utils \
         iproute2 \
