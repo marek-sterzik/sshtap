@@ -21,6 +21,7 @@ prefix_set=""
 restart=""
 follow=""
 devices=()
+wireless_devices=()
 pubkeys=()
 pubkeyfiles=()
 
@@ -205,6 +206,9 @@ operation_attach() {
     for device in "${devices[@]}"; do
         attach_device_to_container "$container_name" "$device"
     done
+    for device in "${wireless_devices[@]}"; do
+        attach_wireless_device_to_container "$container_name" "$device"
+    done
 }
 
 operation_logs() {
@@ -226,14 +230,43 @@ operation_logs() {
     fi
 }
 
-attach_device_to_container() {
+get_container_pid() {
+    if [ -n "$1" ]; then
+        echo "$(docker inspect --format='{{.State.Pid}}' "$1" 2> /dev/null || true)"
+    fi
+}
+
+attach_wireless_device_to_container() {
     local container="$1"
     local device="$2"
 
-    if [ "`id -u`" != 0 ]; then
-        echo "Error: you must be root to proceed this operation" 1>&2
-        return 2
+    container_id="$(get_container_id "$1")"
+    pid="$(get_container_pid "$container_id")"
+
+    if [ -z "$pid" ]; then
+        echo "Error: container not running: $container" 1>&2
+        return 3
     fi
+
+    if ! docker exec "$container_id" ip link show br0 > /dev/null 2>&1; then
+        echo "Error: container does not contain br0 (not an sshtap container?)"
+        return 3
+    fi
+    
+    if iw phy "$device" info > /dev/null 2>&1; then
+        iw phy "$device" set netns "$pid"
+        # docker exec "$container_id" ip link set dev "$device" master br0 up
+    elif ! docker exec "$container_id" iw phy "$device" info > /dev/null 2>&1; then
+        echo "Error: no such device: $device" 1>&2
+        return 4
+    fi
+}
+
+attach_device_to_container() {
+    local container="$1"
+    local device="$2"
+    local container_id
+    local pid
 
     if [ "br0" = "$device" ]; then
         echo "Error: cannot attach br0 device" 1>&2
@@ -241,13 +274,7 @@ attach_device_to_container() {
     fi
 
     container_id="$(get_container_id "$1")"
-
-    if [ -z "$container_id" ]; then
-        echo "Error: no such container: $container" 1>&2
-        return 3
-    fi
-
-    pid="$(docker inspect --format='{{.State.Pid}}' "$container_id" 2> /dev/null || true)"
+    pid="$(get_container_pid "$container_id")"
 
     if [ -z "$pid" ]; then
         echo "Error: container not running: $container" 1>&2
@@ -288,31 +315,32 @@ show_help() {
     echo 1>&2
     echo 1>&2
     echo "common options:" 1>&2
-    echo "  -x --prefix <prefix>         - use this prefix as the namig convention, if not set," 1>&2
-    echo "                                 SSHTAP_CONTAINER_PREFIX env variable is used or 'sshtap'" 1>&2
+    echo "  -x --prefix <prefix>          - use this prefix as the namig convention, if not set," 1>&2
+    echo "                                  SSHTAP_CONTAINER_PREFIX env variable is used or 'sshtap'" 1>&2
     echo 1>&2
     echo "creation options:" 1>&2
-    echo "  -r --restart <prefix>        - restart the container if it is already running" 1>&2
+    echo "  -r --restart <prefix>         - restart the container if it is already running" 1>&2
     echo 1>&2
     echo "server options:" 1>&2
-    echo "  -p --pubkey <pubkey>         - specify public keys in the format of authorized_keys file" 1>&2
-    echo "     --pubkeyfile <pubkeyfile> - specify a file with public keys in the format of" 1>&2
-    echo "                                 authorized_keys file" 1>&2
+    echo "  -p --pubkey <pubkey>          - specify public keys in the format of authorized_keys file" 1>&2
+    echo "     --pubkeyfile <pubkeyfile>  - specify a file with public keys in the format of" 1>&2
+    echo "                                  authorized_keys file" 1>&2
     echo 1>&2
     echo "client options:" 1>&2
-    echo "  -P --peer <peer>             - set the peer to connect to in the form <host>[:<port>]" 1>&2
-    echo "  -k --key <key>               - use the private key passed as an argument" 1>&2
-    echo "     --keyfile <keyfile>       - use the private key from the given file" 1>&2
-    echo "  -r --reset-known-hosts       - reset known hosts when starting the container" 1>&2
+    echo "  -P --peer <peer>              - set the peer to connect to in the form <host>[:<port>]" 1>&2
+    echo "  -k --key <key>                - use the private key passed as an argument" 1>&2
+    echo "     --keyfile <keyfile>        - use the private key from the given file" 1>&2
+    echo "  -r --reset-known-hosts        - reset known hosts when starting the container" 1>&2
     echo 1>&2
     echo "stop options:" 1>&2
-    echo "     --prune                   - wipe also the persistent storage of the container" 1>&2
+    echo "     --prune                    - wipe also the persistent storage of the container" 1>&2
     echo 1>&2
     echo "attach options:" 1>&2
-    echo "  -d --device <device>         - attach this physical device to the container" 1>&2
+    echo "  -d --device <device>          - attach this physical device to the container" 1>&2
+    echo "  -w --wireless-device <device> - attach this physical wireless device to the container" 1>&2
     echo 1>&2
     echo "logs options:" 1>&2
-    echo "  -f --follow                  - follow the logs" 1>&2
+    echo "  -f --follow                   - follow the logs" 1>&2
 }
 
 set_operation() {
@@ -351,9 +379,9 @@ check_value() {
     fi
 }
 
-options="`getopt -o hscSald:p:P:rk:x:rf --long help --long server --long client --long stop --long attach --long attach --long logs \
-              --long device: --long pubkey: --long pubkeyfile: --long prune --long peer: --long reset-known-hosts --long key: \
-              --long keyfile: --long prefix: --long restart --long follow -- "$@"`"
+options="`getopt -o hscSald:w:p:P:rk:x:rf --long help --long server --long client --long stop --long attach --long attach --long logs \
+              --long device: --long dev: --long wireless-device: --long wdev: --long pubkey: --long pubkeyfile: --long prune \
+              --long peer: --long reset-known-hosts --long key: --long keyfile: --long prefix: --long restart --long follow -- "$@"`"
 
 if [ "$?" -eq "0" ]; then
     eval set -- "$options"
@@ -371,8 +399,11 @@ if [ "$?" -eq "0" ]; then
             set_operation "attach";;
         --logs|-l)
             set_operation "logs";;
-        --device|-d)
+        --device|--dev|-d)
             devices+=("$2")
+            shift;;
+        --wireless-device|--wdev|-w)
+            wireless_devices+=("$2")
             shift;;
         --pubkey|-p)
             pubkeys+=("$2")
@@ -428,6 +459,8 @@ fi
 check_value "stop" "--prune may be used only when stopping container" "$prune"
 
 check_value "attach" "--device option is available only with --attach option" "${devices[@]}"
+
+check_value "attach" "--wireless-device option is available only with --attach option" "${wireless_devices[@]}"
 
 check_value "logs" "--follow is available only for --logs action" "$follow"
 
